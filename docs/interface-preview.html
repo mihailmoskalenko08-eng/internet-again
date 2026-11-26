@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Интернет опять отвалился — предпросмотр интерфейса</title>
+<style>
+:root{color-scheme:light;--paper:#f3f2eb;--ink:#171a16;--muted:#585b51;--line:#c9cabf;--faint:#e1e1d6;--rust:#9f3225}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 "Segoe UI",Arial,sans-serif}
+main{max-width:1180px;margin:auto;padding:14px clamp(18px,4.5vw,55px) 23px}
+button,input{font:inherit}
+button{cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--rust);outline-offset:3px}
+h1,h2,p{margin:0}
+.window-title{border-bottom:1px solid var(--line);background:#e9e9e1;padding:10px clamp(18px,4.5vw,55px);font-size:13px;font-weight:700}
+.tabs{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--line);position:relative}
+.tab{border:0;background:transparent;padding:12px 10px 11px 0;text-align:left;color:var(--muted)}
+.tab:hover{color:var(--ink);text-decoration:underline;text-underline-offset:4px}
+.tab[aria-selected="true"]{font-weight:700;color:var(--ink)}
+.underline{position:absolute;left:0;bottom:-1px;width:14%;height:2px;background:var(--ink);pointer-events:none}
+.workspace{overflow:hidden;position:relative;min-height:449px;margin-top:22px}
+.screen[hidden]{display:none}
+.screen.outgoing{position:absolute;inset:0;width:100%;pointer-events:none}
+.hero{display:grid;grid-template-columns:68% 32%;min-height:255px}
+.summary{padding:10px 12px 15px 0}
+.label{font-size:12px;text-transform:uppercase;color:var(--muted)}
+.status{margin:14px 0 22px;font-family:"Arial Black","Segoe UI",Arial,sans-serif;font-size:clamp(37px,7.3vw,90px);font-weight:950;letter-spacing:-.041em;text-transform:uppercase;line-height:.91;white-space:pre-line}
+.description,.foot,.meta{color:var(--muted)}
+.clock{border-left:1px solid var(--faint);padding:24px 0 0 10%;background:linear-gradient(142deg,transparent 49.7%,var(--faint) 50%,transparent 50.3%)}
+.clock-value{font:400 clamp(42px,8.1vw,97px)/1.1 Arial,sans-serif;letter-spacing:-.045em;margin:9px 0 12px;font-variant-numeric:tabular-nums}
+.route{border-block:1px solid var(--line);position:relative;padding:73px 0 20px;display:grid;grid-template-columns:repeat(3,1fr)}
+.route::before,.route::after{content:"";position:absolute;top:45px;left:4%;width:33.333%;border-top:2px solid var(--ink)}
+.route::after{left:37.333%;border-color:var(--line);border-top-style:dashed}
+.route[data-online="true"]::after{border-color:var(--ink);border-top-style:solid}
+.stage{position:relative;padding-left:12%}
+.stage::before{content:"";position:absolute;top:-34px;left:12%;width:11px;height:11px;border-radius:50%;border:2px solid var(--ink);background:var(--paper);z-index:1;transform:translateX(-50%)}
+.stage[data-fail="true"]::before{background:var(--rust);border-color:var(--rust)}
+.stage[data-fail="true"]::after{content:"";position:absolute;top:-40px;left:12%;width:23px;height:23px;border-radius:50%;border:1px solid var(--rust);z-index:1;animation:ripple 1.65s ease-out infinite}
+@keyframes ripple{from{transform:translateX(-50%) scale(.9);opacity:.9}to{transform:translateX(-50%) scale(1.7);opacity:0}}
+.stage strong{font-size:clamp(17px,2.3vw,25px);display:block}
+.stage small{display:block;color:var(--muted);margin-top:4px}
+.stage[data-fail="true"] small{color:var(--rust)}
+.actions{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:18px 0}
+.action{border:1px solid var(--ink);background:var(--ink);color:var(--paper);padding:10px 13px;font-weight:700}
+.action:hover{background:#393b34}
+.secondary{border-color:var(--line);background:transparent;color:var(--ink)}
+.secondary:hover{background:#e4e3da}
+.foot{font-size:12px;border-top:1px solid var(--line);padding-top:10px;margin-top:12px}
+.page-head{display:flex;align-items:center;justify-content:space-between;gap:18px;margin:10px 0 15px}
+.page-head h2,.payment h2{font-size:clamp(28px,4.35vw,56px);letter-spacing:-.045em;line-height:1.05}
+.rule{height:2px;background:var(--ink);margin:10px 0 15px;transform-origin:left}
+.screen.entering .rule{animation:rule-in .30s ease both}
+@keyframes rule-in{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.table-scroll{overflow:auto;margin-top:20px}
+table{width:100%;border-collapse:collapse;white-space:nowrap;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:12px 13px;border-bottom:1px solid var(--line)}
+th{background:var(--ink);color:var(--paper);font-size:13px}
+td{background:#e9e9e1}
+tr:nth-child(even) td{background:var(--paper)}
+.payment{display:grid;grid-template-columns:60% 40%}
+.payment[hidden]{display:none}
+.payment-form{padding:14px 23px 12px 0;display:grid;gap:16px;align-content:start}
+.payment-form label{display:grid;justify-items:start;gap:5px}
+.payment-form input{border:1px solid var(--line);padding:7px 10px;background:#e9e9e1;color:var(--ink)}
+.payment-form input[type=number]{width:86px}
+.payment-actions{display:flex;flex-wrap:wrap;gap:8px}
+.notice{padding:22px 18px;background:#e9e9e1}
+.notice #notice{font-size:clamp(23px,3.1vw,38px);line-height:1.1;letter-spacing:-.035em;margin-top:20px}
+@media(max-width:640px){
+  .tab{font-size:12px;padding:12px 3px}
+  .hero{grid-template-columns:65% 35%;min-height:208px}
+  .summary{padding-top:4px}
+  .status{font-size:clamp(24px,6vw,40px);margin-bottom:14px}
+  .clock{padding-top:12px}
+  .clock-value{font-size:clamp(32px,8.5vw,52px)}
+  .clock .meta,.clock .label{font-size:11px}
+  .payment{grid-template-columns:1fr}
+  .page-head,.actions{flex-wrap:wrap}
+  .stage small{font-size:12px}
+}
+@media(prefers-reduced-motion:reduce){.stage::after,.screen.entering .rule{animation:none!important}}
+</style>
+</head>
+<body>
+<header class="window-title">Интернет опять отвалился</header>
+<main>
+  <nav class="tabs" role="tablist" aria-label="Разделы монитора">
+    <button class="tab" role="tab" id="tab-connection" aria-controls="connection" aria-selected="true">Подключение</button>
+    <button class="tab" role="tab" id="tab-traffic" aria-controls="traffic" aria-selected="false" tabindex="-1">Трафик</button>
+    <button class="tab" role="tab" id="tab-history" aria-controls="history" aria-selected="false" tabindex="-1">Журнал сбоев</button>
+    <button class="tab" role="tab" id="tab-payment" aria-controls="payment" aria-selected="false" tabindex="-1">Оплата</button>
+    <span class="underline" aria-hidden="true"></span>
+  </nav>
+  <div class="workspace">
+    <section class="screen" id="connection" role="tabpanel" aria-labelledby="tab-connection">
+      <div class="hero">
+        <div class="summary">
+          <p class="label">Диагностика подключения</p>
+          <h2 class="status" id="status" aria-live="polite">Шлюз не<br>отвечает</h2>
+          <p class="description" id="description">Wi-Fi подключён. Контрольные сайты недоступны.</p>
+        </div>
+        <div class="clock">
+          <p class="label">Длительность сбоя</p>
+          <p class="clock-value" id="clock">02:32</p>
+          <p class="meta" id="start">Обнаружен в 18:21:12</p>
+        </div>
+      </div>
+      <div class="route" id="route">
+        <div class="stage"><strong>Компьютер</strong><small>Wi-Fi подключён</small></div>
+        <div class="stage" id="gateway" data-fail="true"><strong>Роутер</strong><small>Нет ответа на ping</small></div>
+        <div class="stage" id="web"><strong>Интернет</strong><small>Сайты недоступны</small></div>
+      </div>
+      <div class="actions">
+        <button class="action" id="scenario" type="button">Показать рабочую сеть ↗</button>
+        <p class="meta">Последняя проверка · 18:23:44</p>
+      </div>
+    </section>
+    <section class="screen" id="traffic" role="tabpanel" aria-labelledby="tab-traffic" hidden>
+      <div class="page-head"><h2>Трафик по программам</h2></div>
+      <div class="rule" aria-hidden="true"></div>
+      <p class="meta">Средняя скорость за 5 секунд · объём за местные сутки</p>
+      <div class="table-scroll"><table>
+        <thead><tr><th scope="col">Программа</th><th scope="col">↓ Сейчас</th><th scope="col">↑ Сейчас</th><th scope="col">↓ За день</th><th scope="col">↑ За день</th></tr></thead>
+        <tbody>
+          <tr><td>firefox.exe</td><td>6,2 МиБ/с</td><td>54 КиБ/с</td><td>1,38 ГиБ</td><td>94 МиБ</td></tr>
+          <tr><td>Telegram.exe</td><td>122 КиБ/с</td><td>8 КиБ/с</td><td>183 МиБ</td><td>16 МиБ</td></tr>
+          <tr><td>Система</td><td>5 КиБ/с</td><td>1 КиБ/с</td><td>42 МиБ</td><td>7 МиБ</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+    <section class="screen" id="history" role="tabpanel" aria-labelledby="tab-history" hidden>
+      <div class="page-head"><h2>Журнал отключений</h2></div>
+      <div class="rule" aria-hidden="true"></div>
+      <p class="meta">Пример записей, время по часам компьютера</p>
+      <div class="table-scroll"><table>
+        <thead><tr><th scope="col">Обнаружен сбой</th><th scope="col">Восстановление</th><th scope="col">Длительность</th><th scope="col">Этап сбоя</th></tr></thead>
+        <tbody>
+          <tr><td>26.11.2026 18:21:12</td><td>26.11.2026 18:23:44</td><td>2 мин 32 с</td><td>Шлюз / интернет</td></tr>
+          <tr><td>25.11.2026 09:47:03</td><td>25.11.2026 09:47:27</td><td>24 с</td><td>Интернет</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+    <section class="screen split payment" id="payment" role="tabpanel" aria-labelledby="tab-payment" hidden>
+      <form class="payment-form" id="payment-form">
+        <h2>Оплата интернета</h2>
+        <label>Дата оплаты <input name="date" type="date" value="2026-12-01" required></label>
+        <label>За сколько дней напомнить <input name="lead" type="number" min="0" max="30" value="3" required></label>
+        <div class="payment-actions">
+          <button class="action" type="submit">Сохранить дату</button>
+          <button class="action secondary" id="clear" type="button">Убрать напоминание</button>
+        </div>
+      </form>
+      <div class="notice"><p class="label">Напоминание об оплате</p><div class="rule" aria-hidden="true"></div><p id="notice" aria-live="polite">Следующая оплата<br>01.12.2026</p></div>
+    </section>
+  </div>
+  <footer class="foot">Предпросмотр интерфейса · демонстрационные данные</footer>
+</main>
+<script>
+const tabs = [...document.querySelectorAll('[role="tab"]')];
+const indicator = document.querySelector(".underline");
+const panels = tabs.map(tab => document.getElementById(tab.getAttribute("aria-controls")));
+let selected = 0;
+let transition = [];
+function settle() {
+  for (const animation of transition) animation.cancel();
+  transition = [];
+  panels.forEach((panel, index) => {
+    panel.hidden = index !== selected;
+    panel.inert = false;
+    panel.classList.remove("outgoing", "entering");
+  });
+  indicator.style.left = `${selected * 25}%`;
+}
+function selectTab(tab) {
+  const next = tabs.indexOf(tab);
+  if (next === selected) return;
+  settle();
+  const previous = selected;
+  selected = next;
+  tabs.forEach((item, index) => {
+    item.setAttribute("aria-selected", index === next);
+    item.tabIndex = index === next ? 0 : -1;
+  });
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return settle();
+  const direction = next > previous ? 1 : -1;
+  const options = {duration:300,easing:"cubic-bezier(.42,0,.58,1)",fill:"both"};
+  panels[next].hidden = false;
+  panels[next].classList.add("entering");
+  panels[previous].classList.add("outgoing");
+  panels[previous].inert = true;
+  const incoming = panels[next].animate([{transform:`translateX(${direction*100}%)`},{transform:"translateX(0)"}],options);
+  const outgoing = panels[previous].animate([{transform:"translateX(0)"},{transform:`translateX(${-direction*100}%)`}],options);
+  const rail = indicator.animate([
+    {left:`${previous*25}%`,transform:"scaleX(1)"},
+    {left:`${(previous+next)*12.5}%`,transform:"scaleX(.37)"},
+    {left:`${next*25}%`,transform:"scaleX(1)"}
+  ],options);
+  transition = [incoming,outgoing,rail];
+  Promise.all(transition.map(animation => animation.finished)).then(() => {
+    if (transition.includes(incoming)) settle();
+  }, () => {});
+}
+tabs.forEach((tab, index) => {
+  tab.addEventListener("click", () => selectTab(tab));
+  tab.addEventListener("keydown", event => {
+    const position = {ArrowLeft: index - 1, ArrowRight: index + 1, Home: 0, End: tabs.length - 1};
+    if (!(event.key in position)) return;
+    event.preventDefault();
+    const next = tabs[(position[event.key] + tabs.length) % tabs.length];
+    selectTab(next);
+    next.focus();
+  });
+});
+const scenario = document.getElementById("scenario");
+const status = document.getElementById("status");
+const gateway = document.getElementById("gateway");
+const web = document.getElementById("web");
+scenario.addEventListener("click", () => {
+  const failed = gateway.dataset.fail !== "true";
+  status.replaceChildren(failed ? "Шлюз не" : "Интернет", document.createElement("br"),
+    failed ? "отвечает" : "работает");
+  document.getElementById("description").textContent = failed ?
+    "Wi-Fi подключён. Контрольные сайты недоступны." : "Контрольный сайт ответил по HTTPS.";
+  gateway.dataset.fail = failed;
+  document.getElementById("route").dataset.online = !failed;
+  gateway.querySelector("small").textContent = failed ? "Нет ответа на ping" : "Отвечает · 3 мс";
+  web.querySelector("small").textContent = failed ? "Сайты недоступны" : "HTTPS работает";
+  document.getElementById("clock").textContent = failed ? "02:32" : "—";
+  document.getElementById("start").textContent = failed ? "Обнаружен в 18:21:12" : "Активного сбоя нет";
+  scenario.textContent = failed ? "Показать рабочую сеть ↗" : "Показать пример сбоя ↗";
+});
+const notice = document.getElementById("notice");
+document.getElementById("payment-form").addEventListener("submit", event => {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const date = form.get("date").split("-").reverse().join(".");
+  const days = Number(form.get("lead"));
+  const label = days ? "Дней до оповещения: " + days : "Напомнить в день оплаты";
+  notice.replaceChildren("Следующая оплата · " + date, document.createElement("br"), label);
+});
+document.getElementById("clear").addEventListener("click", () => {
+  notice.textContent = "Напоминание не задано";
+});
+</script>
+</body>
+</html>
