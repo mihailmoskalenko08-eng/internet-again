@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f3f2eb">
+<meta name="description" content="Проверка связи, интерактивная карта сети, журнал и оплата интернета.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Интернет опять отвалился</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icon-180.png">
+<link rel="icon" href="./icon-192.png">
+<link rel="stylesheet" href="./style.css?v=2">
+<script type="module" src="./app.mjs?v=2"></script>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" class="symbols" aria-hidden="true">
+<symbol id="i-route" viewBox="0 0 24 24"><path d="m5 17 7-10 7 10"/><circle cx="5" cy="17" r="2.5"/><circle cx="12" cy="7" r="2.5"/><circle cx="19" cy="17" r="2.5"/></symbol>
+<symbol id="i-journal" viewBox="0 0 24 24"><rect x="5.5" y="3.5" width="13" height="17" rx="2.5"/><path d="M9 8h6m-6 4h6m-6 4h4"/></symbol>
+<symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="15" rx="3"/><path d="M7.5 3.5v4m9-4v4m-13 3h17"/></symbol>
+<symbol id="i-map" viewBox="0 0 24 24"><path d="M12 12 5 7m7 5 7-5m-7 5v7"/><circle cx="12" cy="12" r="2.5"/><circle cx="5" cy="7" r="2"/><circle cx="19" cy="7" r="2"/><circle cx="12" cy="19" r="2"/></symbol>
+</svg>
+<div class="shell">
+<header class="brand"><span class="brand-mark" aria-hidden="true"><svg><use href="#i-route"/></svg></span><span>Интернет опять отвалился</span></header>
+<main id="pages">
+<section id="connection" role="tabpanel" aria-labelledby="tab-connection">
+  <div class="hero"><p class="label">Проверка подключения</p><h1 id="status" aria-live="polite">ПРОВЕРЯЕМ<br>СВЯЗЬ</h1></div>
+  <div class="timer"><div><p class="label">Длительность сбоя</p><p id="duration" class="timer-value">—</p></div><p id="outage-start" class="meta">Ожидаем результат</p></div>
+  <div class="route" id="route">
+    <div class="route-step"><span class="route-dot"></span><div><h2>Устройство</h2><p id="device-status">Тип подключения не определён</p></div></div>
+    <div class="route-step"><span class="route-dot"></span><div><h2>Роутер</h2><p>Проверка недоступна в веб-версии</p></div></div>
+    <div class="route-step" id="route-result"><span class="route-dot"></span><div><h2>Сайт проверки</h2><p id="route-detail">Отправляем запрос</p></div></div>
+  </div>
+  <div class="actions"><p id="last-check" class="meta" aria-live="polite">Первая проверка</p><button type="button" id="check" class="primary">Проверить сейчас</button></div>
+</section>
+<section id="map" role="tabpanel" aria-labelledby="tab-map" hidden>
+  <h1 class="page-title">КАРТА<br>ПРОВЕРКИ</h1>
+  <p class="intro">Перетаскивай узлы. Нажми на любой, чтобы увидеть детали.</p>
+  <div class="graph" id="graph" data-phase="checking">
+    <svg class="graph-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      <line class="edge edge-main" data-edge="device request" x1="17" y1="44" x2="49" y2="48"/>
+      <line class="edge edge-main" data-edge="request answer" x1="49" y1="48" x2="82" y2="41"/>
+      <line class="edge" data-edge="request cache" x1="49" y1="48" x2="58" y2="16"/>
+      <line class="edge" data-edge="request journal" x1="49" y1="48" x2="43" y2="79"/>
+    </svg>
+    <span class="signal" aria-hidden="true"></span>
+    <button type="button" class="node" data-node="device" style="--x:17%;--y:44%" aria-pressed="false"><span class="node-core"><svg><use href="#i-route"/></svg></span><span>Устройство</span></button>
+    <button type="button" class="node hub" data-node="request" style="--x:49%;--y:48%" aria-pressed="true"><span class="node-core"><svg><use href="#i-map"/></svg></span><span>Запрос</span></button>
+    <button type="button" class="node" data-node="answer" style="--x:82%;--y:41%" aria-pressed="false"><span class="node-core">↔</span><span>Ответ</span></button>
+    <button type="button" class="node satellite" data-node="cache" style="--x:58%;--y:16%" aria-pressed="false"><span class="node-core">↓</span><span>Офлайн</span></button>
+    <button type="button" class="node satellite journal-node" data-node="journal" style="--x:43%;--y:79%" aria-pressed="false"><span class="node-core"><svg><use href="#i-journal"/></svg></span><span>Журнал</span></button>
+  </div>
+  <div class="node-detail" aria-live="polite"><p class="label" id="node-label">Запрос</p><h2 id="node-title">Проверяем связь</h2><p id="node-info" class="meta"></p></div>
+  <button type="button" class="primary" id="map-check">Запустить проверку</button>
+</section>
+<section id="journal" role="tabpanel" aria-labelledby="tab-journal" hidden>
+  <h1 class="page-title">ЖУРНАЛ<br>СБОЕВ</h1>
+  <p class="intro">Сбои, замеченные, пока приложение было открыто.</p>
+  <ul id="history" class="history" aria-label="Записи журнала"></ul>
+  <button type="button" id="export" class="primary" disabled>Сохранить отчёт</button>
+</section>
+<section id="payment" role="tabpanel" aria-labelledby="tab-payment" hidden>
+  <h1 class="page-title">ОПЛАТА</h1>
+  <div class="payment-summary"><p class="label">Следующая оплата</p><p id="payment-date" class="payment-date">—</p></div>
+  <form id="payment-form">
+    <label for="due">Дата оплаты</label><input id="due" type="date" required>
+    <label for="lead">Напомнить заранее</label>
+    <select id="lead"><option value="0">В день оплаты</option><option value="1">За 1 день</option><option value="3" selected>За 3 дня</option><option value="7">За 7 дней</option><option value="14">За 14 дней</option></select>
+    <p class="meta" id="calendar-help">Открой файл в календаре и сохрани событие с напоминанием.</p>
+    <button class="primary" type="submit">Добавить в календарь</button>
+    <p class="meta" id="calendar-feedback" role="status" hidden></p>
+  </form>
+</section>
+</main>
+<nav class="navbar" role="tablist" aria-label="Разделы">
+  <span class="nav-indicator" aria-hidden="true"></span>
+  <button type="button" role="tab" id="tab-connection" aria-controls="connection" aria-selected="true"><svg aria-hidden="true"><use href="#i-route"/></svg><span>Связь</span></button>
+  <button type="button" role="tab" id="tab-map" aria-controls="map" aria-selected="false" tabindex="-1"><svg aria-hidden="true"><use href="#i-map"/></svg><span>Карта</span></button>
+  <button type="button" role="tab" id="tab-journal" aria-controls="journal" aria-selected="false" tabindex="-1"><svg aria-hidden="true"><use href="#i-journal"/></svg><span>Журнал</span></button>
+  <button type="button" role="tab" id="tab-payment" aria-controls="payment" aria-selected="false" tabindex="-1"><svg aria-hidden="true"><use href="#i-calendar"/></svg><span>Оплата</span></button>
+</nav>
+</div>
+</body>
+</html>
