@@ -12,10 +12,13 @@ using System.Threading.Tasks;
 
 namespace InternetAgain
 {
+    internal enum RouteStep { Computer, Gateway, Internet }
+
     internal sealed class CheckResult
     {
         public DateTime At = DateTime.UtcNow;
         public bool? Online;
+        public RouteStep? Fault;
         public string Headline, Detail, Wifi, Link, Router, Internet, Stage;
         public IPAddress Gateway;
         public bool GatewayTested, GatewayResponded;
@@ -44,7 +47,7 @@ namespace InternetAgain
                     result.Link = "Нет активного адаптера";
                     result.Router = result.Internet = "Проверка недоступна";
                     return Finish(result, false, "Сетевой адаптер", "Компьютер не подключён к сети",
-                        "Проверьте подключение к Wi-Fi или сетевой кабель.");
+                        "Проверьте подключение к Wi-Fi или сетевой кабель.", RouteStep.Computer);
                 }
 
                 var localAddresses = new[] { SourceAddress("1.1.1.1"), SourceAddress("2606:4700:4700::1111") };
@@ -83,12 +86,12 @@ namespace InternetAgain
                 result.Internet = "Контрольные сайты недоступны";
                 if (localAddresses.All(address => address == null) && gateway == null)
                     return Finish(result, false, "Маршрут", "Не найден маршрут в интернет",
-                        "Проверьте настройки IP и подключение к домашней сети.");
+                        "Проверьте настройки IP и подключение к домашней сети.", RouteStep.Gateway);
                 if (result.GatewayTested && !result.GatewayResponded)
                     return Finish(result, false, "Шлюз / интернет", "Шлюз не ответил, сайты недоступны",
-                        "Шлюз может блокировать ping. Проверьте роутер и повторите проверку.");
+                        "Шлюз может блокировать ping. Проверьте роутер и повторите проверку.", RouteStep.Gateway);
                 return Finish(result, false, "Интернет", "Сайты недоступны",
-                    "Проверьте линию провайдера, DNS или страницу входа в сеть.");
+                    "Проверьте линию провайдера, DNS или страницу входа в сеть.", RouteStep.Internet);
             }
             catch (Exception e)
             {
@@ -101,9 +104,10 @@ namespace InternetAgain
             }
         }
 
-        private static CheckResult Finish(CheckResult result, bool? online, string stage, string title, string detail)
+        private static CheckResult Finish(CheckResult result, bool? online, string stage, string title, string detail, RouteStep? fault = null)
         {
             result.Online = online;
+            result.Fault = fault;
             result.Stage = stage;
             result.Headline = title;
             result.Detail = detail;

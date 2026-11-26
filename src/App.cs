@@ -56,19 +56,24 @@ namespace InternetAgain
 
     internal sealed class Dashboard : Form
     {
-        private static readonly Color Background = Color.FromArgb(16, 21, 33);
-        private static readonly Color Surface = Color.FromArgb(26, 34, 50);
-        private static readonly Color Raised = Color.FromArgb(37, 47, 68);
-        private static readonly Color TextColor = Color.FromArgb(240, 243, 252);
-        private static readonly Color Muted = Color.FromArgb(170, 182, 205);
-        private static readonly Color Accent = Color.FromArgb(194, 179, 255);
-        private static readonly Color Good = Color.FromArgb(126, 227, 182);
-        private static readonly Color Warning = Color.FromArgb(255, 194, 134);
+        private static readonly Color Background = Color.FromArgb(243, 242, 235);
+        private static readonly Color Surface = Color.FromArgb(233, 233, 225);
+        private static readonly Color Raised = Color.FromArgb(222, 223, 214);
+        private static readonly Color TextColor = Color.FromArgb(23, 26, 22);
+        private static readonly Color Muted = Color.FromArgb(88, 91, 81);
+        private static readonly Color Rule = Color.FromArgb(201, 202, 191);
+        private static readonly Color Dark = Color.FromArgb(23, 26, 22);
+        private static readonly Color Light = Color.FromArgb(243, 242, 235);
+        private static readonly Color Warning = Color.FromArgb(159, 50, 37);
+        private const double SlideMilliseconds = 300;
         private const string StartupKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
         private const string StartupValue = "InternetAgain";
 
         private readonly System.Windows.Forms.Timer checkTimer = new System.Windows.Forms.Timer { Interval = 8000 };
         private readonly System.Windows.Forms.Timer updateTimer = new System.Windows.Forms.Timer { Interval = 2000 };
+        private readonly System.Windows.Forms.Timer motionTimer = new System.Windows.Forms.Timer { Interval = 16 };
+        private readonly System.Windows.Forms.Timer elapsedTimer = new System.Windows.Forms.Timer { Interval = 250 };
+        private readonly Stopwatch motionClock = Stopwatch.StartNew();
         private readonly NotifyIcon tray;
         private readonly ContextMenuStrip trayMenu;
         private readonly bool elevated = TrafficMeter.IsElevated();
@@ -78,8 +83,12 @@ namespace InternetAgain
         private readonly Panel content;
         private readonly Panel[] pages = new Panel[4];
         private readonly Button[] tabs = new Button[4];
+        private readonly RevealRule[] pageRules = new RevealRule[4];
         private readonly Label footer;
-        private readonly Label headline, detail, lastCheck, wifi, link, router, internet, quality;
+        private readonly DisplayText headline, outageClock;
+        private readonly Label detail, lastCheck, wifi, link, router, internet, quality, outageLabel, outageStart;
+        private readonly TabRail tabRail;
+        private readonly RouteGraphic routeGraphic;
         private readonly Button checkButton, trafficButton;
         private readonly Label trafficStatus, journalStatus, notice;
         private readonly DataGridView trafficGrid, journalGrid;
@@ -92,7 +101,10 @@ namespace InternetAgain
         private Dictionary<string, TrafficTotal> rates = new Dictionary<string, TrafficTotal>();
         private TrafficMeter meter;
         private string meterError, storageError;
-        private int selectedPage;
+        private int selectedPage = -1, outgoingPage = -1;
+        private double transitionStarted, checkStarted, faultStarted;
+        private double? ruleStarted;
+        private bool allowMotion;
         private int lastJournalMinute = -1;
         private bool dirty, checking, exiting, updatingStartup;
 
@@ -114,123 +126,171 @@ namespace InternetAgain
 
             Text = Program.Title;
             Icon = SystemIcons.Information;
-            ClientSize = new Size(980, 680);
-            MinimumSize = new Size(840, 680);
+            ClientSize = new Size(1080, 635);
+            MinimumSize = new Size(800, 600);
             StartPosition = FormStartPosition.CenterScreen;
             AutoScaleMode = AutoScaleMode.Dpi;
             BackColor = Background;
             ForeColor = TextColor;
             Font = new Font("Segoe UI", 10);
-            Padding = new Padding(26, 18, 26, 12);
+            Padding = new Padding(36, 6, 36, 10);
+            allowMotion = Motion.EnabledInWindows();
 
-            var shell = Layout(104, 49, -1, 30);
+            var shell = Layout(59, 14, -1, 28);
             Controls.Add(shell);
-            var brand = Layout(38, 50);
-            brand.Controls.Add(Caption("МОНИТОР ПОДКЛЮЧЕНИЯ", 10, Accent, true), 0, 0);
-            brand.Controls.Add(Caption(Program.Title, 27, TextColor, true), 0, 1);
-            shell.Controls.Add(brand, 0, 0);
-
-            var navigation = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1 };
-            string[] tabNames = { "Подключение", "Трафик", "Журнал сбоев", "Оплата" };
+            var navigation = Layout(-1, 11);
+            var navigationButtons = Columns(4);
+            string[] tabNames = { "Подключение", "Трафик", "Журнал", "Оплата" };
             for (int i = 0; i < tabs.Length; i++)
             {
                 int page = i;
-                navigation.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
                 tabs[i] = ActionButton(tabNames[i], delegate { ShowPage(page); });
-                tabs[i].Margin = new Padding(0, 0, i == 3 ? 0 : 8, 8);
-                navigation.Controls.Add(tabs[i], i, 0);
+                tabs[i].BackColor = Background;
+                tabs[i].ForeColor = Muted;
+                tabs[i].FlatAppearance.MouseOverBackColor = Surface;
+                tabs[i].FlatAppearance.MouseDownBackColor = Raised;
+                tabs[i].TextAlign = ContentAlignment.MiddleLeft;
+                tabs[i].Margin = Padding.Empty;
+                navigationButtons.Controls.Add(tabs[i], i, 0);
             }
-            shell.Controls.Add(navigation, 0, 1);
-            content = new Panel { Dock = DockStyle.Fill };
+            navigation.Controls.Add(navigationButtons, 0, 0);
+            tabRail = new TabRail(tabs.Length, Rule) { Dock = DockStyle.Fill, Margin = Padding.Empty,
+                BackColor = Background, ForeColor = TextColor };
+            navigation.Controls.Add(tabRail, 0, 1);
+            shell.Controls.Add(navigation, 0, 0);
+            content = new BufferedPanel { Dock = DockStyle.Fill, Margin = Padding.Empty };
             shell.Controls.Add(content, 0, 2);
             footer = Caption("", 9, Muted, false);
             footer.AutoEllipsis = true;
             shell.Controls.Add(footer, 0, 3);
 
-            var connection = Layout(78, 44, 39, 20, 70, 70, 70, -1);
-            connection.Padding = new Padding(20, 8, 20, 8);
-            connection.BackColor = Surface;
-            headline = Caption("Проверяем подключение", 24, TextColor, true);
-            detail = Caption("Смотрим состояние адаптеров, шлюза и доступность сайтов.", 10, Muted, false);
-            lastCheck = Caption("Ожидаем результат", 9, Muted, false);
-            checkButton = ActionButton("Проверить сейчас", RunCheck);
-            var controls = new TableLayoutPanel { ColumnCount = 2, RowCount = 1, Dock = DockStyle.Fill };
-            controls.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            controls.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));
-            controls.Controls.Add(lastCheck, 0, 0);
-            controls.Controls.Add(checkButton, 1, 0);
-            connection.Controls.Add(headline, 0, 0);
-            connection.Controls.Add(detail, 0, 1);
-            connection.Controls.Add(controls, 0, 2);
-            connection.Controls.Add(Stage("Компьютер", out wifi, out link), 0, 4);
-            connection.Controls.Add(Stage("Роутер / шлюз", out router, out quality), 0, 5);
+            var connection = Layout(-1, 1, 66, 106, 1, 62);
+            var hero = Split(70);
+            var summary = Layout(33, -1, 65);
+            summary.Margin = new Padding(0, 8, 31, 14);
+            summary.Controls.Add(Caption("ДИАГНОСТИКА ПОДКЛЮЧЕНИЯ", 9, Muted, false), 0, 0);
+            headline = new DisplayText("ПРОВЕРЯЕМ\nПОДКЛЮЧЕНИЕ", new Font("Arial Black", 68), 1.4f)
+                { ForeColor = TextColor };
+            summary.Controls.Add(headline, 0, 1);
+            detail = Caption("Проверяем адаптер, шлюз и доступность сайтов.", 12, Muted, false);
+            detail.AutoEllipsis = true;
+            summary.Controls.Add(detail, 0, 2);
+            hero.Controls.Add(summary, 0, 0);
+
+            var elapsed = new DraftingPanel();
+            var elapsedContent = Layout(42, -1, 52);
+            elapsedContent.Padding = new Padding(19, 13, 12, 13);
+            elapsedContent.BackColor = Color.Transparent;
+            outageLabel = Caption("ДЛИТЕЛЬНОСТЬ СБОЯ", 9, Muted, true);
+            outageLabel.TextAlign = ContentAlignment.BottomLeft;
+            outageClock = new DisplayText("—", new Font("Arial", 73), 1.15f)
+                { ForeColor = TextColor, BackColor = Color.Transparent };
+            outageStart = Caption("Ожидаем результат проверки", 10, Muted, false);
+            outageStart.AutoEllipsis = true;
+            foreach (var label in new[] { outageLabel, outageStart }) label.BackColor = Color.Transparent;
+            elapsedContent.Controls.Add(outageLabel, 0, 0);
+            elapsedContent.Controls.Add(outageClock, 0, 1);
+            elapsedContent.Controls.Add(outageStart, 0, 2);
+            elapsed.Controls.Add(elapsedContent);
+            hero.Controls.Add(elapsed, 1, 0);
+            connection.Controls.Add(hero, 0, 0);
+            connection.Controls.Add(Divider(), 0, 1);
+
+            routeGraphic = new RouteGraphic(TextColor, Rule, Warning) { Dock = DockStyle.Fill, BackColor = Background,
+                Margin = Padding.Empty };
+            connection.Controls.Add(routeGraphic, 0, 2);
+            var stages = Columns(3);
+            stages.Controls.Add(Stage("Компьютер", out wifi, out link), 0, 0);
+            stages.Controls.Add(Stage("Роутер", out router, out quality), 1, 0);
             Label internetHint;
-            connection.Controls.Add(Stage("Интернет", out internet, out internetHint), 0, 6);
-            internetHint.Text = "Доступность контрольных сайтов по HTTPS";
+            stages.Controls.Add(Stage("Интернет", out internet, out internetHint), 2, 0);
+            internetHint.Text = "Контрольные сайты по HTTPS";
+            connection.Controls.Add(stages, 0, 3);
+            connection.Controls.Add(Divider(), 0, 4);
+
+            var actions = Split(100, 365);
+            checkButton = ActionButton("Проверить сейчас   ↗", RunCheck);
+            checkButton.Dock = DockStyle.Left;
+            checkButton.Width = 192;
+            checkButton.Margin = new Padding(0, 11, 0, 9);
+            lastCheck = Caption("Ожидаем результат", 9, Muted, false);
+            lastCheck.TextAlign = ContentAlignment.MiddleRight;
+            actions.Controls.Add(checkButton, 0, 0);
+            actions.Controls.Add(lastCheck, 1, 0);
+            connection.Controls.Add(actions, 0, 5);
             pages[0] = Wrap(connection);
 
-            var traffic = Layout(43, 44, -1, 26);
-            traffic.Padding = new Padding(12, 8, 12, 8);
-            traffic.BackColor = Surface;
-            var trafficTop = new TableLayoutPanel { ColumnCount = 2, RowCount = 1, Dock = DockStyle.Fill };
-            trafficTop.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            trafficTop.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 252));
-            trafficTop.Controls.Add(Caption("Трафик по программам", 17, TextColor, true), 0, 0);
+            var traffic = Layout(70, 2, 39, -1, 35);
+            var trafficTop = Split(100, 229);
+            trafficTop.Controls.Add(Caption("Трафик по программам", 30, TextColor, true), 0, 0);
             trafficButton = ActionButton(elevated ? "Включить учёт" : "Включить учёт трафика", StartTraffic);
+            trafficButton.Margin = new Padding(0, 12, 0, 14);
             trafficTop.Controls.Add(trafficButton, 1, 0);
-            trafficStatus = Caption("", 9, Muted, false);
+            trafficStatus = Caption("", 10, Muted, false);
             trafficGrid = Grid(new[] { "Программа", "↓ Сейчас", "↑ Сейчас", "↓ За день", "↑ За день" },
                 new float[] { 37, 16, 16, 16, 15 });
             traffic.Controls.Add(trafficTop, 0, 0);
-            traffic.Controls.Add(trafficStatus, 0, 1);
-            traffic.Controls.Add(trafficGrid, 0, 2);
-            traffic.Controls.Add(Caption("↓ Получено   ·   ↑ Отправлено   ·   С начала учёта за местные сутки", 9, Muted, false), 0, 3);
+            traffic.Controls.Add(PageRule(1), 0, 1);
+            traffic.Controls.Add(trafficStatus, 0, 2);
+            traffic.Controls.Add(trafficGrid, 0, 3);
+            traffic.Controls.Add(Caption("↓ Получено   ·   ↑ Отправлено   ·   Учтено за местные сутки", 9, Muted, false), 0, 4);
             pages[1] = Wrap(traffic);
 
-            var journal = Layout(44, 42, -1);
-            journal.Padding = new Padding(12, 8, 12, 8);
-            journal.BackColor = Surface;
-            var journalTop = new TableLayoutPanel { ColumnCount = 2, RowCount = 1, Dock = DockStyle.Fill };
-            journalTop.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            journalTop.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 186));
-            journalTop.Controls.Add(Caption("Журнал отключений", 17, TextColor, true), 0, 0);
-            journalTop.Controls.Add(ActionButton("Сохранить отчёт", Export), 1, 0);
-            journalStatus = Caption("", 9, Muted, false);
+            var journal = Layout(70, 2, 39, -1);
+            var journalTop = Split(100, 186);
+            journalTop.Controls.Add(Caption("Журнал отключений", 30, TextColor, true), 0, 0);
+            var export = ActionButton("Сохранить отчёт   ↗", Export);
+            export.Margin = new Padding(0, 12, 0, 14);
+            journalTop.Controls.Add(export, 1, 0);
+            journalStatus = Caption("", 10, Muted, false);
             journalGrid = Grid(new[] { "Обнаружен сбой", "Восстановление", "Длительность", "Этап сбоя" },
                 new float[] { 26, 29, 17, 28 });
             journal.Controls.Add(journalTop, 0, 0);
-            journal.Controls.Add(journalStatus, 0, 1);
-            journal.Controls.Add(journalGrid, 0, 2);
+            journal.Controls.Add(PageRule(2), 0, 1);
+            journal.Controls.Add(journalStatus, 0, 2);
+            journal.Controls.Add(journalGrid, 0, 3);
             pages[2] = Wrap(journal);
 
-            var payment = Layout(58, 52, 75, 75, 50, 54, -1);
-            payment.Padding = new Padding(20, 8, 20, 8);
-            payment.BackColor = Surface;
-            payment.Controls.Add(Caption("Оплата интернета", 21, TextColor, true), 0, 0);
-            notice = Caption("", 11, Accent, true);
-            payment.Controls.Add(notice, 0, 1);
+            var payment = Split(60);
+            var paymentForm = Layout(62, 69, 69, 49, 52, -1);
+            paymentForm.Padding = new Padding(0, 0, 18, 0);
+            paymentForm.Controls.Add(Caption("Оплата интернета", 30, TextColor, true), 0, 0);
             due = new DateTimePicker { Format = DateTimePickerFormat.Custom, CustomFormat = "dd.MM.yyyy",
                 Font = new Font("Segoe UI", 12), Width = 205 };
             DateTime saved;
             due.Value = ReadDue(out saved) ? saved : DateTime.Today.AddDays(7);
-            payment.Controls.Add(PaymentField("Дата оплаты", due), 0, 2);
+            paymentForm.Controls.Add(PaymentField("Дата оплаты", due), 0, 1);
             lead = new NumericUpDown { Minimum = 0, Maximum = 30, Value = state.LeadDays, Width = 100,
-                Font = new Font("Segoe UI", 12) };
-            payment.Controls.Add(PaymentField("За сколько дней напомнить", lead), 0, 3);
+                Font = new Font("Segoe UI", 12), BackColor = Surface, ForeColor = TextColor };
+            paymentForm.Controls.Add(PaymentField("За сколько дней напомнить", lead), 0, 2);
             var paymentActions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
             var save = ActionButton("Сохранить дату", SaveReminder);
             var clear = ActionButton("Убрать напоминание", ClearReminder);
             save.Dock = clear.Dock = DockStyle.None;
-            save.Size = new Size(164, 37);
-            clear.Size = new Size(200, 37);
-            save.BackColor = Accent;
-            save.ForeColor = Background;
+            save.Size = new Size(154, 38);
+            clear.Size = new Size(185, 38);
+            clear.BackColor = Surface;
+            clear.ForeColor = TextColor;
+            clear.FlatAppearance.BorderSize = 1;
+            clear.FlatAppearance.BorderColor = Rule;
+            clear.FlatAppearance.MouseOverBackColor = Raised;
             paymentActions.Controls.AddRange(new Control[] { save, clear });
-            payment.Controls.Add(paymentActions, 0, 4);
+            paymentForm.Controls.Add(paymentActions, 0, 3);
             startup = new CheckBox { Text = "Запускать в области уведомлений при входе в Windows",
                 ForeColor = TextColor, Dock = DockStyle.Fill, Checked = IsStartupEnabled() };
             startup.CheckedChanged += delegate { SetStartup(); };
-            payment.Controls.Add(startup, 0, 5);
+            paymentForm.Controls.Add(startup, 0, 4);
+            payment.Controls.Add(paymentForm, 0, 0);
+            var paymentSummary = Layout(42, 2, -1);
+            paymentSummary.Padding = new Padding(18, 10, 18, 15);
+            paymentSummary.BackColor = Surface;
+            paymentSummary.Controls.Add(Caption("НАПОМИНАНИЕ ОБ ОПЛАТЕ", 9, Muted, true), 0, 0);
+            notice = Caption("", 23, TextColor, true);
+            notice.TextAlign = ContentAlignment.TopLeft;
+            notice.Padding = new Padding(0, 22, 0, 0);
+            paymentSummary.Controls.Add(PageRule(3), 0, 1);
+            paymentSummary.Controls.Add(notice, 0, 2);
+            payment.Controls.Add(paymentSummary, 1, 0);
             pages[3] = Wrap(payment);
 
             for (int i = 0; i < pages.Length; i++) content.Controls.Add(pages[i]);
@@ -244,6 +304,11 @@ namespace InternetAgain
 
             checkTimer.Tick += delegate { RunCheck(); };
             updateTimer.Tick += delegate { Tick(); };
+            motionTimer.Tick += delegate { DrawMotion(); };
+            elapsedTimer.Tick += delegate { RenderOutageClock(); };
+            content.SizeChanged += delegate { ArrangePages(); };
+            VisibleChanged += delegate { SyncAnimation(); };
+            Resize += delegate { SyncAnimation(); };
             Microsoft.Win32.SystemEvents.PowerModeChanged += HandlePower;
             if (elevated) EnableMeter();
             ShowPage(openTraffic ? 1 : 0);
@@ -264,9 +329,64 @@ namespace InternetAgain
             return table;
         }
 
+        private static TableLayoutPanel Split(float leftPercent, int rightWidth = 0)
+        {
+            var table = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
+                Margin = Padding.Empty };
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, leftPercent));
+            table.ColumnStyles.Add(rightWidth > 0 ? new ColumnStyle(SizeType.Absolute, rightWidth)
+                : new ColumnStyle(SizeType.Percent, 100 - leftPercent));
+            table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            return table;
+        }
+
+        private static TableLayoutPanel Columns(int count)
+        {
+            var table = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = count, RowCount = 1,
+                Margin = Padding.Empty };
+            for (int i = 0; i < count; i++) table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / count));
+            table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            return table;
+        }
+
+        private RevealRule PageRule(int page)
+        {
+            var rule = new RevealRule { Dock = DockStyle.Fill, Margin = Padding.Empty, BackColor = Rule,
+                ForeColor = TextColor };
+            pageRules[page] = rule;
+            return rule;
+        }
+
+        private static Panel Divider()
+        {
+            return new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty, BackColor = Rule };
+        }
+
+        private sealed class DraftingPanel : BufferedPanel
+        {
+            public DraftingPanel()
+            {
+                Dock = DockStyle.Fill;
+                Margin = new Padding(0, 20, 0, 18);
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                base.OnPaint(e);
+                int width = ClientSize.Width - 1;
+                int height = ClientSize.Height - 1;
+                if (width < 2 || height < 2) return;
+                using (var guide = new Pen(Color.FromArgb(226, 226, 216)))
+                {
+                    e.Graphics.DrawLine(guide, 0, 0, 0, height);
+                    e.Graphics.DrawLine(guide, 0, height, width, 0);
+                }
+            }
+        }
+
         private static Panel Wrap(Control control)
         {
-            var panel = new Panel { Dock = DockStyle.Fill, Visible = false, BackColor = Surface };
+            var panel = new BufferedPanel { Visible = false, BackColor = Background, Margin = Padding.Empty };
             panel.Controls.Add(control);
             return panel;
         }
@@ -280,28 +400,25 @@ namespace InternetAgain
         private static Button ActionButton(string text, Action action)
         {
             var button = new Button { Text = text, Dock = DockStyle.Fill, FlatStyle = FlatStyle.Flat,
-                ForeColor = TextColor, BackColor = Raised, Cursor = Cursors.Hand };
+                ForeColor = Light, BackColor = Dark, Cursor = Cursors.Hand, UseVisualStyleBackColor = false };
             button.FlatAppearance.BorderSize = 0;
-            button.FlatAppearance.MouseOverBackColor = Color.FromArgb(71, 69, 106);
+            button.FlatAppearance.MouseOverBackColor = Color.FromArgb(57, 59, 52);
             button.Click += delegate { action(); };
             return button;
         }
 
         private static Control Stage(string title, out Label value, out Label note)
         {
-            var row = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2,
-                BackColor = Raised, Padding = new Padding(14, 3, 14, 3), Margin = new Padding(0, 0, 0, 8) };
-            row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 29));
-            row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 71));
-            row.RowStyles.Add(new RowStyle(SizeType.Percent, 59));
-            row.RowStyles.Add(new RowStyle(SizeType.Percent, 41));
-            value = Caption("Проверяем…", 11, TextColor, true);
+            var row = Layout(36, 30, -1);
+            row.Margin = new Padding(32, 0, 10, 0);
+            var heading = Caption(title, 16, TextColor, true);
+            value = Caption("Ожидаем проверку", 11, Muted, false);
+            value.AutoEllipsis = true;
             note = Caption("", 9, Muted, false);
-            var heading = Caption(title, 11, Accent, true);
+            note.AutoEllipsis = true;
             row.Controls.Add(heading, 0, 0);
-            row.SetRowSpan(heading, 2);
-            row.Controls.Add(value, 1, 0);
-            row.Controls.Add(note, 1, 1);
+            row.Controls.Add(value, 0, 1);
+            row.Controls.Add(note, 0, 2);
             return row;
         }
 
@@ -317,14 +434,14 @@ namespace InternetAgain
         {
             var grid = new DataGridView { Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false,
                 AllowUserToDeleteRows = false, AllowUserToResizeRows = false, MultiSelect = false,
-                RowHeadersVisible = false, ColumnHeadersHeight = 34, GridColor = Raised,
+                RowHeadersVisible = false, ColumnHeadersHeight = 38, GridColor = Rule, CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
                 BorderStyle = BorderStyle.None, BackgroundColor = Surface, EnableHeadersVisualStyles = false,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, SelectionMode = DataGridViewSelectionMode.FullRowSelect };
-            grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { BackColor = Raised, ForeColor = Accent,
-                SelectionBackColor = Raised, SelectionForeColor = Accent, Padding = new Padding(6, 0, 3, 0) };
+            grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { BackColor = Dark, ForeColor = Light,
+                SelectionBackColor = Dark, SelectionForeColor = Light, Padding = new Padding(6, 0, 3, 0) };
             grid.DefaultCellStyle = new DataGridViewCellStyle { BackColor = Surface, ForeColor = TextColor,
-                SelectionBackColor = Raised, SelectionForeColor = TextColor, Padding = new Padding(6, 0, 3, 0) };
-            grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(30, 39, 56);
+                SelectionBackColor = Dark, SelectionForeColor = Light, Padding = new Padding(6, 0, 3, 0) };
+            grid.AlternatingRowsDefaultCellStyle.BackColor = Background;
             grid.RowTemplate.Height = 31;
             foreach (string heading in headings)
             {
@@ -335,18 +452,131 @@ namespace InternetAgain
             return grid;
         }
 
+        private bool WindowCanAnimate
+        {
+            get { return Visible && WindowState != FormWindowState.Minimized && !exiting; }
+        }
+
         private void ShowPage(int page)
         {
+            if (page == selectedPage) return;
+            int previous = selectedPage;
+            FinishTransition();
+            FinishRule();
             selectedPage = page;
-            for (int i = 0; i < pages.Length; i++)
+            for (int i = 0; i < tabs.Length; i++)
             {
-                pages[i].Visible = i == page;
-                tabs[i].BackColor = i == page ? Accent : Raised;
-                tabs[i].ForeColor = i == page ? Background : TextColor;
+                tabs[i].ForeColor = i == page ? TextColor : Muted;
+                tabs[i].AccessibleDescription = i == page ? "Текущий раздел" : null;
             }
-            pages[page].BringToFront();
+
+            if (allowMotion && WindowCanAnimate && previous >= 0 && content.ClientSize.Width > 0)
+            {
+                outgoingPage = previous;
+                transitionStarted = motionClock.Elapsed.TotalMilliseconds;
+                ArrangePages();
+                pages[page].BringToFront();
+                pages[page].Visible = true;
+            }
+            else FinishTransition();
+
+            if (page == 0) RenderOutageClock();
             if (page == 1) RefreshTraffic();
             if (page == 2) RefreshJournal();
+            if (previous >= 0) HighlightPage();
+            SyncAnimation();
+        }
+
+        private void FinishTransition()
+        {
+            if (selectedPage < 0) return;
+            outgoingPage = -1;
+            for (int i = 0; i < pages.Length; i++)
+                pages[i].Visible = i == selectedPage;
+            pages[selectedPage].Bounds = content.ClientRectangle;
+            pages[selectedPage].BringToFront();
+            tabRail.Position(selectedPage, 1);
+        }
+
+        private void ArrangePages()
+        {
+            if (selectedPage < 0) return;
+            Rectangle area = content.ClientRectangle;
+            if (outgoingPage < 0)
+            {
+                pages[selectedPage].Bounds = area;
+                return;
+            }
+
+            double progress = Math.Min(1, (motionClock.Elapsed.TotalMilliseconds - transitionStarted) / SlideMilliseconds);
+            if (progress >= 1)
+            {
+                FinishTransition();
+                return;
+            }
+            double eased = Motion.Ease(progress);
+            int direction = selectedPage > outgoingPage ? 1 : -1;
+            int width = area.Width;
+            int exited = (int)Math.Round(width * eased);
+            pages[outgoingPage].Bounds = new Rectangle(-exited * direction, 0, width, area.Height);
+            pages[selectedPage].Bounds = new Rectangle((width - exited) * direction, 0, width, area.Height);
+            tabRail.Position(outgoingPage + (selectedPage - outgoingPage) * eased,
+                1 - 0.63 * Math.Sin(Math.PI * progress));
+        }
+
+        private void HighlightPage()
+        {
+            if (selectedPage < 1 || !allowMotion || !WindowCanAnimate) return;
+            ruleStarted = motionClock.Elapsed.TotalMilliseconds;
+            pageRules[selectedPage].Reveal(0);
+            SyncAnimation();
+        }
+
+        private void FinishRule()
+        {
+            if (!ruleStarted.HasValue) return;
+            ruleStarted = null;
+            pageRules[selectedPage].Reveal(1);
+        }
+
+        private void SyncAnimation()
+        {
+            bool visible = WindowCanAnimate;
+            bool routeVisible = visible && selectedPage == 0;
+            elapsedTimer.Enabled = routeVisible;
+            if (!visible || !allowMotion)
+            {
+                if (outgoingPage >= 0) FinishTransition();
+                FinishRule();
+                routeGraphic.SetMotion(0, null);
+            }
+            motionTimer.Enabled = visible && allowMotion &&
+                (outgoingPage >= 0 || ruleStarted.HasValue || (routeVisible && (checking || routeGraphic.HasFailure)));
+        }
+
+        private void DrawMotion()
+        {
+            if (!WindowCanAnimate || !allowMotion)
+            {
+                SyncAnimation();
+                return;
+            }
+            if (outgoingPage >= 0) ArrangePages();
+            if (ruleStarted.HasValue)
+            {
+                double progress = Math.Min(1, (motionClock.Elapsed.TotalMilliseconds - ruleStarted.Value) / 460);
+                if (progress >= 1) FinishRule();
+                else pageRules[selectedPage].Reveal(Motion.Ease(progress));
+            }
+            if (selectedPage == 0 && (checking || routeGraphic.HasFailure))
+            {
+                double now = motionClock.Elapsed.TotalMilliseconds;
+                double pulse = routeGraphic.HasFailure ? ((now - faultStarted) % 1650) / 1650 : 0;
+                double? scan = checking && !routeGraphic.HasFailure ?
+                    (double?)Motion.Ease(((now - checkStarted) % 1100) / 1100) : null;
+                routeGraphic.SetMotion(pulse, scan);
+            }
+            else if (outgoingPage < 0 && !ruleStarted.HasValue) motionTimer.Stop();
         }
 
         private async void RunCheck()
@@ -355,6 +585,8 @@ namespace InternetAgain
             checking = true;
             checkButton.Enabled = false;
             checkButton.Text = "Проверяем…";
+            checkStarted = motionClock.Elapsed.TotalMilliseconds;
+            SyncAnimation();
             try
             {
                 var result = await Task.Run(() => NetworkCheck.Run());
@@ -372,6 +604,8 @@ namespace InternetAgain
                     dirty = true;
                     SaveState();
                 }
+                if (latest == null || latest.Fault != result.Fault)
+                    faultStarted = motionClock.Elapsed.TotalMilliseconds;
                 latest = result;
                 RenderConnection();
                 if (Visible && selectedPage == 2) RefreshJournal();
@@ -381,39 +615,72 @@ namespace InternetAgain
                 if (exiting) return;
                 state.BreakObservation();
                 dirty = true;
-                headline.Text = "Не удалось проверить подключение";
-                headline.ForeColor = Warning;
+                headline.Text = "ОШИБКА\nПРОВЕРКИ";
                 detail.Text = e.Message;
                 latest = null;
                 routerSamples.Clear();
                 wifi.Text = router.Text = internet.Text = "Нет данных";
+                wifi.ForeColor = router.ForeColor = internet.ForeColor = Muted;
                 link.Text = quality.Text = "";
                 lastCheck.Text = "Повторим автоматически";
+                routeGraphic.SetResult(null, null);
+                RenderOutageClock();
             }
             finally
             {
                 checking = false;
                 if (!exiting)
                 {
-                    checkButton.Text = "Проверить сейчас";
+                    checkButton.Text = "Проверить сейчас   ↗";
                     checkButton.Enabled = true;
+                    if (!routeGraphic.HasFailure) routeGraphic.SetMotion(0, null);
+                    SyncAnimation();
                 }
             }
         }
 
         private void RenderConnection()
         {
-            headline.Text = latest.Headline;
-            headline.ForeColor = latest.Online == true ? Good : Warning;
+            if (latest.Online == true) headline.Text = "ИНТЕРНЕТ\nРАБОТАЕТ";
+            else if (latest.Fault == RouteStep.Computer) headline.Text = "НЕТ\nПОДКЛЮЧЕНИЯ";
+            else if (latest.Fault == RouteStep.Gateway)
+                headline.Text = latest.GatewayTested ? "ШЛЮЗ НЕ\nОТВЕЧАЕТ" : "НЕТ\nМАРШРУТА";
+            else headline.Text = latest.Online == false ? "ИНТЕРНЕТ\nНЕДОСТУПЕН" : "ОШИБКА\nПРОВЕРКИ";
             detail.Text = latest.Detail;
-            lastCheck.Text = "Проверка в " + latest.At.ToLocalTime().ToString("HH:mm:ss");
+            lastCheck.Text = "Последняя проверка · " + latest.At.ToLocalTime().ToString("HH:mm:ss");
             wifi.Text = "Wi-Fi · " + latest.Wifi;
-            link.Text = "Активное подключение · " + latest.Link;
+            link.Text = "Активный адаптер · " + latest.Link;
             router.Text = latest.Router;
             internet.Text = latest.Internet;
+            wifi.ForeColor = latest.Fault == RouteStep.Computer ? Warning : TextColor;
+            router.ForeColor = latest.Fault == RouteStep.Gateway ? Warning : TextColor;
+            internet.ForeColor = latest.Fault == RouteStep.Internet ? Warning : Muted;
             quality.Text = routerSamples.Count == 0 ? "" : "Без ответа: " +
                 routerSamples.Count(success => !success) + " из " + routerSamples.Count + " ping";
+            routeGraphic.SetResult(latest.Online, latest.Fault);
+            RenderOutageClock();
             tray.Text = latest.Online == true ? "Интернет работает" : Program.Title;
+        }
+
+        private void RenderOutageClock()
+        {
+            var current = state.Outages.LastOrDefault();
+            bool active = current != null && !current.End.HasValue && !current.Interrupted;
+            if (!active)
+            {
+                outageClock.Text = "—";
+                outageStart.Text = latest == null || !latest.Online.HasValue ? "Ожидаем результат проверки" :
+                    "Активного сбоя нет";
+                return;
+            }
+
+            TimeSpan duration = DateTime.UtcNow - current.Start;
+            if (duration < TimeSpan.Zero) duration = TimeSpan.Zero;
+            string minutes = duration.Minutes.ToString("00", CultureInfo.InvariantCulture);
+            string seconds = duration.Seconds.ToString("00", CultureInfo.InvariantCulture);
+            outageClock.Text = duration.TotalHours < 1 ? minutes + ":" + seconds :
+                ((long)duration.TotalHours).ToString(CultureInfo.InvariantCulture) + ":" + minutes + ":" + seconds;
+            outageStart.Text = "Обнаружен в " + current.Start.ToLocalTime().ToString("HH:mm:ss");
         }
 
         private void HandlePower(object sender, PowerModeChangedEventArgs e)
@@ -425,6 +692,7 @@ namespace InternetAgain
                 {
                     if (exiting) return;
                     state.BreakObservation();
+                    RenderOutageClock();
                     routerSamples.Clear();
                     dirty = true;
                     SaveState();
@@ -436,6 +704,12 @@ namespace InternetAgain
         private void Tick()
         {
             if (exiting) return;
+            bool windowsMotion = Motion.EnabledInWindows();
+            if (windowsMotion != allowMotion)
+            {
+                allowMotion = windowsMotion;
+                SyncAnimation();
+            }
             CollectTraffic();
             CheckReminder();
             if (dirty && DateTime.UtcNow - lastWrite > TimeSpan.FromSeconds(8)) SaveState();
@@ -624,6 +898,7 @@ namespace InternetAgain
                 {
                     File.WriteAllText(dialog.FileName, text.ToString(), new UTF8Encoding(true));
                     journalStatus.Text = "Отчёт сохранён.";
+                    HighlightPage();
                 }
                 catch (Exception e) { ShowError("Не удалось сохранить отчёт.", e); }
             }
@@ -646,6 +921,7 @@ namespace InternetAgain
             dirty = true;
             CheckReminder();
             SaveState();
+            HighlightPage();
         }
 
         private void ClearReminder()
@@ -654,6 +930,7 @@ namespace InternetAgain
             dirty = true;
             CheckReminder();
             SaveState();
+            HighlightPage();
         }
 
         private void CheckReminder()
@@ -742,6 +1019,8 @@ namespace InternetAgain
             exiting = true;
             checkTimer.Stop();
             updateTimer.Stop();
+            motionTimer.Stop();
+            elapsedTimer.Stop();
             SystemEvents.PowerModeChanged -= HandlePower;
             if (meter != null) meter.Dispose();
             CollectTraffic();
@@ -779,6 +1058,8 @@ namespace InternetAgain
             {
                 checkTimer.Dispose();
                 updateTimer.Dispose();
+                motionTimer.Dispose();
+                elapsedTimer.Dispose();
                 if (tray != null) tray.Dispose();
                 if (trayMenu != null) trayMenu.Dispose();
             }
